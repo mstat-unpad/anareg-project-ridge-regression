@@ -2143,7 +2143,14 @@ server <- function(input, output, session) {
     ols_all <- coef(model$ols)
     ols_all <- setNames(as.numeric(ols_all), names(coef(model$ols)))
 
-    ridge_mat <- as.matrix(coef(model$ridge_path, s = lambda))
+    # Fit Ridge langsung pada lambda yang sedang dipilih.
+    # Ini menjaga interaktivitas slider: setiap lambda menghasilkan
+    # koefisien Ridge yang benar-benar dihitung pada lambda tersebut.
+    ridge_at_lambda <- glmnet::glmnet(
+      x = model$X_train, y = model$Y_train, alpha = 0,
+      lambda = lambda, standardize = FALSE
+    )
+    ridge_mat <- as.matrix(coef(ridge_at_lambda))
     ridge_all <- setNames(as.numeric(ridge_mat[, 1]), rownames(ridge_mat))
 
     out <- data.frame(
@@ -2180,7 +2187,7 @@ server <- function(input, output, session) {
     p <- ggplot(df, aes(x = Variable, y = Coefficient, fill = Model,
                         text = paste0("Prediktor: ", Variable,
                                       "<br>Model: ", Model,
-                                      "<br>Beta: ", round(Coefficient, 4)))) +
+                                      "<br>Beta: ", round(Coefficient, 6)))) +
       geom_col(position = position_dodge(width = .78), width = .68) +
       geom_hline(yintercept = 0, linetype = "dashed", color = "#98A2B3") +
       scale_fill_manual(values = c("OLS" = "#E76F51", "Ridge" = "#00A6A6")) +
@@ -2203,8 +2210,8 @@ server <- function(input, output, session) {
 
     data.frame(
       Prediktor = cmp$Prediktor,
-      Beta_OLS = round(cmp$Beta_OLS, 4),
-      Beta_Ridge = round(cmp$Beta_Ridge, 4),
+      Beta_OLS = round(cmp$Beta_OLS, 6),
+      Beta_Ridge = round(cmp$Beta_Ridge, 6),
       Selisih = round(cmp$Beta_Ridge - cmp$Beta_OLS, 4),
       Rasio_Ridge_OLS = round(ifelse(abs(cmp$Beta_OLS) > 1e-12,
                                      cmp$Beta_Ridge / cmp$Beta_OLS,
@@ -2339,16 +2346,21 @@ server <- function(input, output, session) {
     vars <- intersect(m$predictor_names, colnames(m$boot_beta_ridge))
     req(length(vars) > 0, nrow(m$boot_beta_ridge) >= Bsel)
 
-    # Ringkasan benar-benar mengikuti jumlah bootstrap yang dipilih.
+    # SE dan CI benar-benar mengikuti jumlah bootstrap yang dipilih.
     mat <- m$boot_beta_ridge[seq_len(Bsel), vars, drop = FALSE]
-    mean_beta <- colMeans(mat, na.rm = TRUE)
     se_beta <- apply(mat, 2, sd, na.rm = TRUE)
     ci_low <- apply(mat, 2, quantile, probs = 0.025, na.rm = TRUE, names = FALSE)
     ci_high <- apply(mat, 2, quantile, probs = 0.975, na.rm = TRUE, names = FALSE)
 
+    # Beta_Ridge yang ditampilkan adalah koefisien Ridge final pada
+    # lambda optimal 10-fold CV, bukan mean bootstrap.
+    beta_final_all <- as.matrix(coef(m$ridge_final))
+    beta_final_all <- setNames(as.numeric(beta_final_all[, 1]), rownames(beta_final_all))
+    beta_ridge_final <- unname(beta_final_all[vars])
+
     out <- data.frame(
       Prediktor = vars,
-      Mean = round(as.numeric(mean_beta), 4),
+      Beta_Ridge = round(as.numeric(beta_ridge_final), 6),
       SE = round(as.numeric(se_beta), 4),
       `CI 95% Lower` = round(as.numeric(ci_low), 4),
       `CI 95% Upper` = round(as.numeric(ci_high), 4),
